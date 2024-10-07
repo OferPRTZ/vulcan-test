@@ -1,0 +1,20 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  IMAGE_NAME: "<YOUR_NAME>-flask-app"
+  ECR_REGISTRY: "your_account_id.dkr.ecr.your_region.amazonaws.com"
+
+build:
+  stage: build
+  script:
+    - echo "Building Docker image with Kaniko"
+    - /kaniko/executor --dockerfile=Dockerfile --destination=$ECR_REGISTRY/$IMAGE_NAME:latest
+
+deploy:
+  stage: deploy
+ script:
+    - echo "Deploying application with Helm"
+    - helm upgrade --install flask-app ../helm-chart --namespace <YOUR_NAME>-devops-test --set image.repository=$ECR_REGISTRY/$IMAGE_NAME,image.tag=latest
+

@@ -1,0 +1,116 @@
+name: Deploy Flask App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      ECR_REPO: 302263046734.dkr.ecr.us-east-1.amazonaws.com/vulcan-test
+      AWS_REGION: us-east-1
+      CLUSTER_NAME: <YOUR_CLUSTER_NAME>
+      NAMESPACE: ofer-devops-test
+      IMAGE_TAG: latest
+
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Step 2: Set up AWS CLI and EKS
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Step 3: Install kubectl using the official GitHub Action
+      - name: Install kubectl
+        uses: actions/setup-kubectl@v3
+        with:
+          version: 'v1.21.0'  # Use a specific version compatible with your EKS cluster
+
+      - name: Set up EKS Cluster
+        run: |
+          aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      # Step 4: Install Terraform CLI
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.0.10
+
+      # Step 5: Initialize and Apply Terraform
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      # Step 6: Build Docker image using Kaniko and push to ECR
+      - name: Build and push Docker image with Kaniko
+        run: |
+          docker run \
+            -v $(pwd):/workspace \
+            -v /kaniko/.docker:/kaniko/.docker \
+            gcr.io/kaniko-project/executor:latest \
+            --context /workspace \
+            --dockerfile ./Dockerfile \
+            --destination ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }} \
+            --cache=true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      # Step 7: Update Helm chart values for new image
+      - name: Update Helm chart with new image
+        run: |
+          helm upgrade --install vulcan-test ./helm \
+            --namespace ${{ env.NAMESPACE }} \
+            --set image.repository=${{ env.ECR_REPO }} \
+            --set image.tag=${{ env.IMAGE_TAG }}
+
+      # Step 8: Install ExternalDNS for DNS management
+      - name: Install External DNS
+        run: |
+          helm upgrade --install external-dns bitnami/external-dns \
+            --namespace kube-system \
+            --set provider=aws \
+            --set aws.region=${{ env.AWS_REGION }} \
+            --set aws.zoneType=public
+
+      # Step 9: Install AWS Load Balancer Controller
+      - name: Install AWS Load Balancer Controller
+        run: |
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            --namespace kube-system \
+            --set clusterName=${{ env.CLUSTER_NAME }} \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=aws-load-balancer-controller
+
+      # Step 10: Get Terraform Role ARN and Assign it to ServiceAccount
+      - name: Get Terraform Role ARN
+        id: terraform
+        run: |
+          echo "ecr_pull_role_arn=$(terraform output -raw ecr_pull_role_arn)" >> $GITHUB_ENV
+
+      - name: Assign Role to ServiceAccount
+        run: |
+          helm upgrade --install vulcan-test ./helm \
+            --namespace ${{ env.NAMESPACE }} \
+            --set image.repository=${{ env.ECR_REPO }} \
+            --set image.tag=${{ env.IMAGE_TAG }} \
+            --set serviceAccount.roleArn=${{ env.ecr_pull_role_arn }}
+

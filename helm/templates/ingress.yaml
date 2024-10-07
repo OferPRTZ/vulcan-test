@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flask-app-ingress
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    kubernetes.io/ingress.class: "alb"
+    alb.ingress.kubernetes.io/certificate-arn: auto
+    external-dns.alpha.kubernetes.io/hostname: "{{ .Release.Namespace }}.vulcancyber.com"
+spec:
+  rules:
+    - host: "{{ .Release.Namespace }}.vulcancyber.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: flask-app
+                port:
+                  number: 80
+
