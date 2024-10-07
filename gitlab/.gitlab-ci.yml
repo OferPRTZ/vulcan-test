@@ -1,20 +1,59 @@
 stages:
+  - terraform
   - build
   - deploy
 
 variables:
-  IMAGE_NAME: "<YOUR_NAME>-flask-app"
-  ECR_REGISTRY: "your_account_id.dkr.ecr.your_region.amazonaws.com"
+  ECR_REPO: 302263046734.dkr.ecr.us-east-1.amazonaws.com/vulcan-test
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: eks-test
+  NAMESPACE: ofer-devops-test
+  IMAGE_TAG: latest
 
+# Step 1: Run Terraform to set up IAM Roles and Policies
+terraform:
+  stage: terraform
+  image: hashicorp/terraform:latest
+  script:
+    - terraform init
+    - terraform apply -auto-approve
+  artifacts:
+    reports:
+      dotenv: .env
+  before_script:
+    - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+  environment:
+    name: production
+  only:
+    - main
+
+# Step 2: Build Docker image using Kaniko and push to ECR
 build:
   stage: build
+  image: gcr.io/kaniko-project/executor:latest
   script:
-    - echo "Building Docker image with Kaniko"
-    - /kaniko/executor --dockerfile=Dockerfile --destination=$ECR_REGISTRY/$IMAGE_NAME:latest
+    - mkdir -p /kaniko/.docker
+    - echo "{\"credsStore\":\"ecr-login\"}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --destination $ECR_REPO:$IMAGE_TAG --cache=true
+  before_script:
+    - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+  only:
+    - main
 
+# Step 3: Deploy the application using Helm
 deploy:
   stage: deploy
- script:
-    - echo "Deploying application with Helm"
-    - helm upgrade --install flask-app ../helm-chart --namespace <YOUR_NAME>-devops-test --set image.repository=$ECR_REGISTRY/$IMAGE_NAME,image.tag=latest
+  image: alpine/helm:3.5.0
+  script:
+    - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+    - helm upgrade --install vulcan-test ./helm --namespace $NAMESPACE --set image.repository=$ECR_REPO --set image.tag=$IMAGE_TAG --set serviceAccount.roleArn=$ECR_PULL_ROLE_ARN
+  before_script:
+    - apk add --no-cache curl bash jq aws-cli
+    - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+    - export ECR_PULL_ROLE_ARN=$(terraform output -raw ecr_pull_role_arn)
+  only:
+    - main
 
