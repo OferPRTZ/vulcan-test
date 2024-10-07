@@ -32,7 +32,7 @@ jobs:
 
       # Step 3: Install kubectl using the official GitHub Action
       - name: Install kubectl
-        uses: actions/setup-kubectl@v3
+        uses: azure/setup-kubectl@v3
         with:
           version: 'v1.21.0'  # Use a specific version compatible with your EKS cluster
 
