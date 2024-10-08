@@ -60,13 +60,14 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
 
       # Step 6: Build Docker image using Kaniko and push to ECR
-      - name: Build and push Docker image with Kaniko
-        uses: crazy-max/ghaction-kaniko@v2
+      - name: Build and Push Docker Image with Kaniko
+        uses: gcr.io/kaniko-project/executor@v1
         with:
-          context: .
-          dockerfile: ./Dockerfile
-          destination: ${{ secrets.ECR_REPO }}:latest
-          cache: true
+          args: >
+            --dockerfile ./Dockerfile
+            --context ${GITHUB_WORKSPACE}
+            --destination ${{ secrets.ECR_REPO }}:latest
+
 
       # Step 7: Update Helm chart values for new image
       - name: Update Helm chart with new image
