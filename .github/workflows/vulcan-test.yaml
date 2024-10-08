@@ -67,7 +67,7 @@ jobs:
             -v /kaniko/.docker:/kaniko/.docker \
             gcr.io/kaniko-project/executor:latest \
             --context /workspace \
-            --dockerfile ./Dockerfile \
+            --dockerfile ./workspace/Dockerfile \
             --destination ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }} \
             --cache=true
         env:
